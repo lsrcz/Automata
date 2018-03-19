@@ -21,9 +21,15 @@ description:         Please see the README on Github at <https://github.com/lsrc
 
 dependencies:
 - base >= 4.7 && < 5
+- unordered-containers
+- hashable
 
 library:
   source-dirs: src
+  exposed-modules:
+    - Data.Automata
+    - Data.Automata.DFA
+    - Data.Automata.NFA
 
 tests:
   automata-test:
@@ -35,3 +41,4 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - automata
+    - hspec
