@@ -1,5 +1,6 @@
 module Data.Automata.NFA
     ( NFA
+    , NFAInvalid(..)
     , getStates
     , getSymbols
     , getStartState
@@ -16,7 +17,9 @@ import Data.Automata
 import qualified Data.HashMap.Lazy as M
 import qualified Data.HashSet as S
 import Data.Hashable
+import Data.Either
 import Data.Maybe
+import Data.Monoid
 
 data NFA state symbol = NFA
   { getStates :: S.HashSet state
@@ -30,8 +33,8 @@ data NFA state symbol = NFA
 instance Automata NFA where
   isAccepted (NFA _ _ _ acceptingStates _ nowStates) = 
     any (`S.member` acceptingStates) nowStates
-  delta nfa@(NFA states symbols startState 
-             acceptingStates transitionTable nowStates) 
+  delta (NFA states symbols startState 
+         acceptingStates transitionTable nowStates) 
         symbol =
     let
       newStates = 
@@ -50,30 +53,82 @@ instance Automata NFA where
 -------------------------------------------------------------------------------
 -- * Construction
 
-validateFunction :: (Hashable state, Hashable symbol, 
-                     Eq state, Eq symbol) =>
-  [((state, symbol), [state])] -> Bool
+data NFAInvalid =
+    NFAEmptyStates
+  | NFAEmptySymbols
+  | NFAInvalidStartState
+  | NFAInvalidAcceptingStates
+  | NFAInvalidInputState
+  | NFAInvalidInputSymbol
+  | NFAInvalidOutputState
+  | NFANotAValidFunction
+  deriving (Eq, Show)
+
+validateStates :: (Hashable state, Eq state) => 
+  [state] -> Either NFAInvalid (S.HashSet state)
+validateStates [] = Left NFAEmptyStates
+validateStates states = Right $ S.fromList states
+
+validateSymbols :: (Hashable symbol, Eq symbol) =>
+  [symbol] -> Either NFAInvalid (S.HashSet symbol)
+validateSymbols [] = Left NFAEmptySymbols
+validateSymbols symbols = Right $ S.fromList symbols
+
+validateStartState :: (Hashable state, Eq state) =>
+  S.HashSet state -> state -> Either NFAInvalid state
+validateStartState stateList startState =
+  if S.member startState stateList
+    then Right startState
+    else Left NFAInvalidStartState
+
+validateAcceptingStates :: (Hashable state, Eq state) =>
+  S.HashSet state -> [state] -> Either NFAInvalid (S.HashSet state)
+validateAcceptingStates stateList acceptingStates =
+  if all (`S.member` stateList) acceptingStates
+    then Right $ S.fromList acceptingStates
+    else Left NFAInvalidAcceptingStates
+
+validateTableIO :: (Hashable state, Hashable symbol,
+                    Eq state, Eq symbol) =>
+     S.HashSet state -> S.HashSet symbol -> [((state, symbol), [state])]
+  -> Maybe NFAInvalid
+validateTableIO stateList symbolList transitionTable =
+  case filter (not . and) $ 
+       map (\((istate,isymbol),ostates) -> 
+            [ S.member istate stateList
+            , S.member isymbol symbolList
+            , all (`S.member` stateList) ostates]) transitionTable of
+    [] -> Nothing
+    ([False,_,_]:_) -> Just NFAInvalidInputState
+    ([_,False,_]:_) -> Just NFAInvalidInputSymbol
+    ([_,_,False]:_) -> Just NFAInvalidOutputState
+
+validateFunction :: (Hashable state, Hashable symbol,
+                    Eq state, Eq symbol) =>
+     [((state, symbol), [state])]
+  -> Maybe NFAInvalid
 validateFunction transitionTable =
   let
     domain = map fst transitionTable
-    sizeTableList = length transitionTable
+    transitionNum = length transitionTable
     cardinalityOfDomain = S.size $ S.fromList domain
   in
-    sizeTableList == cardinalityOfDomain
+    if transitionNum == cardinalityOfDomain 
+      then Nothing
+      else Just NFANotAValidFunction
 
-validate :: (Hashable state, Hashable symbol, 
-             Eq state, Eq symbol) =>
-  NFA state symbol -> Bool
-validate (NFA states symbols startState
-              acceptingStates transitionTable nowStates) =
-     all (\(state, symbol) -> S.member state states && S.member symbol symbols)
-         (M.keys transitionTable)
-  && all (all (`S.member` states)) (M.elems transitionTable)
-  && S.member startState states
-  && all (`S.member` states) nowStates
-  && all (`S.member` states) acceptingStates
+validateTransitionTable :: (Hashable state, Hashable symbol,
+                            Eq state, Eq symbol) =>
+     S.HashSet state -> S.HashSet symbol -> [((state, symbol), [state])] 
+  -> Either NFAInvalid (M.HashMap (state, symbol) (S.HashSet state))
+validateTransitionTable stateList symbolList transitionTable =
+  case getFirst $
+    First (validateTableIO stateList symbolList transitionTable) <>
+    First (validateFunction transitionTable) of
+      Just err -> Left err
+      Nothing -> Right $ M.map S.fromList $ M.fromList transitionTable
 
--- | Construct a DFA
+-- | Construct a NFA
 newNFA :: (Hashable state, Hashable symbol, 
            Eq state, Eq symbol) =>
      [state]
@@ -81,21 +136,19 @@ newNFA :: (Hashable state, Hashable symbol,
   -> state 
   -> [state]
   -> [((state, symbol), [state])]
-  -> Maybe (NFA state symbol)
+  -> Either NFAInvalid (NFA state symbol)
 newNFA states symbols startState acceptingStates transitionTable =
   let
-    statesSet = S.fromList states
-    symbolsSet = S.fromList symbols
-    acceptingStateSet = S.fromList acceptingStates
-    transitionTableMap = M.map S.fromList $ M.fromList transitionTable
-    nfa = NFA statesSet symbolsSet startState 
-              acceptingStateSet transitionTableMap (S.singleton startState)
-  in 
-    if validate nfa && validateFunction transitionTable
-      then Just nfa
-      else Nothing
-
-
-
-
+    eitherStateList = validateStates states
+    eitherSymbolList = validateSymbols symbols
+  in
+    case (eitherStateList, eitherSymbolList) of
+      (Right stateList, Right symbolList) ->
+        NFA stateList symbolList
+          <$> validateStartState stateList startState
+          <*> validateAcceptingStates stateList acceptingStates
+          <*> validateTransitionTable stateList symbolList transitionTable
+          <*> fmap S.singleton (validateStartState stateList startState)
+      (Left err, _) -> Left err
+      (_, Left err) -> Left err
 
