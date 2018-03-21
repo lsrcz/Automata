@@ -128,6 +128,13 @@ validateTransitionTable stateList symbolList transitionTable =
       Just err -> Left err
       Nothing -> Right $ M.map S.fromList $ M.fromList transitionTable
 
+flattenTableSymbols :: (Hashable state, Hashable symbol,
+                      Eq state, Eq symbol) =>
+  [((state, [symbol]), [state])] -> [((state, symbol), [state])]
+flattenTableSymbols [] = []
+flattenTableSymbols (((istate, isymbols), ostate):table) =
+  foldr (\x acc -> ((istate, x), ostate) : acc) (flattenTableSymbols table) isymbols
+
 -- | Construct a NFA
 newNFA :: (Hashable state, Hashable symbol, 
            Eq state, Eq symbol) =>
@@ -135,7 +142,7 @@ newNFA :: (Hashable state, Hashable symbol,
   -> [symbol]
   -> state 
   -> [state]
-  -> [((state, symbol), [state])]
+  -> [((state, [symbol]), [state])]
   -> Either NFAInvalid (NFA state symbol)
 newNFA states symbols startState acceptingStates transitionTable =
   let
@@ -147,7 +154,8 @@ newNFA states symbols startState acceptingStates transitionTable =
         NFA stateList symbolList
           <$> validateStartState stateList startState
           <*> validateAcceptingStates stateList acceptingStates
-          <*> validateTransitionTable stateList symbolList transitionTable
+          <*> validateTransitionTable stateList symbolList 
+              (flattenTableSymbols transitionTable)
           <*> fmap S.singleton (validateStartState stateList startState)
       (Left err, _) -> Left err
       (_, Left err) -> Left err
