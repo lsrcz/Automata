@@ -103,30 +103,14 @@ validateTableIO stateList symbolList transitionTable =
     ([_,False,_]:_) -> Just NFAInvalidInputSymbol
     ([_,_,False]:_) -> Just NFAInvalidOutputState
 
-validateFunction :: (Hashable state, Hashable symbol,
-                    Eq state, Eq symbol) =>
-     [((state, symbol), [state])]
-  -> Maybe NFAInvalid
-validateFunction transitionTable =
-  let
-    domain = map fst transitionTable
-    transitionNum = length transitionTable
-    cardinalityOfDomain = S.size $ S.fromList domain
-  in
-    if transitionNum == cardinalityOfDomain 
-      then Nothing
-      else Just NFANotAValidFunction
-
 validateTransitionTable :: (Hashable state, Hashable symbol,
                             Eq state, Eq symbol) =>
      S.HashSet state -> S.HashSet symbol -> [((state, symbol), [state])] 
   -> Either NFAInvalid (M.HashMap (state, symbol) (S.HashSet state))
 validateTransitionTable stateList symbolList transitionTable =
-  case getFirst $
-    First (validateTableIO stateList symbolList transitionTable) <>
-    First (validateFunction transitionTable) of
+  case validateTableIO stateList symbolList transitionTable of
       Just err -> Left err
-      Nothing -> Right $ M.map S.fromList $ M.fromList transitionTable
+      Nothing -> Right $ M.map S.fromList $ M.fromListWith (++) transitionTable
 
 flattenTableSymbols :: (Hashable state, Hashable symbol,
                       Eq state, Eq symbol) =>

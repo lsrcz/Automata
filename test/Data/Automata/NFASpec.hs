@@ -68,18 +68,22 @@ spec = do
       it "can detect an error in the transitionTable/outputState" $
         (newNFA [Q0] "0" Q0 [Q0] [((Q0,"0"),[Q1])] :: Either NFAInvalid (NFA States Char))
           `shouldBe` Left NFAInvalidOutputState
-      it "can detect an error in the transitionTable/not a function" $ do
+      it ("duplicate entries or missing entries in the transitionTable of an NFA" ++
+         "is not an error") $ do
         let nfa = newNFA [Q0,Q1] 
                          "01"
                          Q0 
                          [Q1] 
                          [((Q0,"0"),[Q0])
                          ,((Q0,"1"),[Q1])
-                         ,((Q0,"0"),[Q0])
+                         ,((Q0,"0"),[Q1])
                          ,((Q1,"0"),[Q0])
                          ,((Q1,"1"),[Q1])] :: Either NFAInvalid (NFA States Char)
-        nfa `shouldBe` Left NFANotAValidFunction
-
+        fmap getTransitionTable nfa `shouldBe` 
+          Right (M.fromList [((Q0,'0'),S.fromList [Q0,Q1])
+                            ,((Q0,'1'),S.fromList [Q1])
+                            ,((Q1,'0'),S.fromList [Q0])
+                            ,((Q1,'1'),S.fromList [Q1])])
   describe "Automata instance" $ do
     describe "isAccepted" $ do
       it "should not accept" $ do
