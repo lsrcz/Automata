@@ -30,6 +30,7 @@ library:
     - Data.Automata
     - Data.Automata.DFA
     - Data.Automata.NFA
+    - Data.Automata.EpsNFA
 
 tests:
   automata-test:
