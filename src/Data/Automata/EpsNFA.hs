@@ -1,16 +1,11 @@
 module Data.Automata.EpsNFA
-    ( EpsNFA
+    ( EpsNFA(..)
     , EpsNFAInvalid(..)
-    , getStates
-    , getSymbols
-    , getStartState
-    , getAcceptingStates
-    , getTransitionTable
-    , getNowStates
     , newEpsNFA
     , delta
     , deltaHat
     , isAccepted
+    , computeEpsClosureTable
     ) where
 
 import Data.Automata
@@ -20,6 +15,11 @@ import Data.Hashable
 import Data.Either
 import Data.Maybe
 import Data.Monoid
+import Control.Monad.ST
+import Control.Monad
+import qualified Data.Vector.Unboxed.Mutable as M
+import qualified Data.Vector.Unboxed as U
+import qualified Data.Vector as V
 
 data EpsNFA state symbol = EpsNFA
   { getStates :: S.HashSet state
@@ -28,33 +28,75 @@ data EpsNFA state symbol = EpsNFA
   , getAcceptingStates :: S.HashSet state
   , getTransitionTable :: M.HashMap (state, Maybe symbol) (S.HashSet state)
   , getNowStates :: S.HashSet state
+  , getEpsClosureTable :: M.HashMap state (S.HashSet state)
   } deriving (Show, Eq)
 
-epsClosureFromTable :: (Hashable state, Hashable symbol,
-                        Eq state, Eq symbol) =>
-  M.HashMap (state, Maybe symbol) (S.HashSet state) -> state -> S.HashSet state
-epsClosureFromTable transitionTable state =
-  S.insert state $
-  fromMaybe S.empty $
-  M.lookup (state, Nothing) transitionTable
+changeNowStates :: (Hashable state, Hashable symbol,
+                    Eq state, Eq symbol) =>
+  EpsNFA state symbol -> S.HashSet state -> EpsNFA state symbol
+changeNowStates (EpsNFA st sym stst accst tab _ epstbl) newnst =
+  EpsNFA st sym stst accst tab newnst epstbl
 
-epsClosure :: (Hashable state, Hashable symbol,
-               Eq state, Eq symbol) =>
-  EpsNFA state symbol -> state -> S.HashSet state
-epsClosure epsnfa = epsClosureFromTable (getTransitionTable epsnfa)
 
-epsClosureEpsNFA :: (Hashable state, Hashable symbol,
-                     Eq state, Eq symbol) =>
+floyd :: Int -> U.Vector Bool -> U.Vector Bool
+floyd len origGraph = runST $ do
+  let 
+    mread vec i j = M.unsafeRead vec (i * len + j)
+    mwrite vec i j = M.unsafeWrite vec (i * len + j)
+  graph <- U.thaw origGraph
+  let 
+    loop1 k
+      | k == len = return ()
+      | otherwise =
+        let 
+          loop2 i 
+            | i == len = return ()
+            | otherwise =
+              let
+                loop3 j
+                  | j == len = return ()
+                  | otherwise = do
+                    xij <- mread graph i j
+                    xik <- mread graph i k
+                    xkj <- mread graph k j
+                    mwrite graph i j (xij || (xik && xkj))
+                    loop3 (j + 1)
+              in loop3 0 >> loop2 (i + 1)
+        in loop2 0 >> loop1 (k + 1)
+  loop1 0
+  U.unsafeFreeze graph
+
+
+epsClosureTable :: (Hashable state, Hashable symbol,
+                    Eq state, Eq symbol) =>
+     EpsNFA state symbol
+  -> M.HashMap state (S.HashSet state)
+epsClosureTable epsnfa =
+  let
+    stateVec = V.fromList $ S.toList $ getStates epsnfa
+    len = V.length stateVec
+    graphVec = U.generate (len * len) f
+    f i = 
+      case divMod i len of
+        (d,m) -> d == m || S.member (stateVec V.! m)
+          (M.lookupDefault S.empty (stateVec V.! d, Nothing) $ 
+          getTransitionTable epsnfa)
+    accFunc acc idx x = if x then divMod idx len : acc else acc
+    stateIdxList = U.ifoldl' accFunc [] $ floyd len graphVec
+    statePairList = map (\(i,j) -> (stateVec V.! i, S.singleton $ stateVec V.! j)) stateIdxList
+  in 
+    M.fromListWith S.union statePairList
+
+computeEpsClosureTable :: (Hashable state, Hashable symbol,
+                           Eq state, Eq symbol) =>
   EpsNFA state symbol -> EpsNFA state symbol
-epsClosureEpsNFA (EpsNFA st sym stst accst tab nst) =
-  EpsNFA st sym stst accst tab $
-    S.unions $ map (epsClosureFromTable tab) (S.toList nst)
+computeEpsClosureTable epsnfa@(EpsNFA st sym stst accst tab nst _) =
+  EpsNFA st sym stst accst tab nst $ epsClosureTable epsnfa
 
 instance Automata EpsNFA where
-  isAccepted (EpsNFA _ _ _ acceptingStates _ nowStates) = 
+  isAccepted (EpsNFA _ _ _ acceptingStates _ nowStates _) = 
     any (`S.member` acceptingStates) nowStates
-  delta (EpsNFA states symbols startState 
-         acceptingStates transitionTable nowStates) 
+  delta epsnfa@(EpsNFA _ _ _ _ transitionTable nowStates epsTable) 
         symbol =
     let
       newStates = 
@@ -63,17 +105,10 @@ instance Automata EpsNFA where
             (S.toList nowStates)
       newStatesWithEps =
         S.unions $
-        newStates :
-        map (fromMaybe S.empty . (\x -> M.lookup (x, Nothing) transitionTable))
+        map (fromMaybe S.empty . (`M.lookup` epsTable))
             (S.toList newStates)
     in
-      EpsNFA states
-          symbols
-          startState
-          acceptingStates
-          transitionTable
-          newStatesWithEps
-
+      changeNowStates epsnfa newStatesWithEps
 
 -------------------------------------------------------------------------------
 -- * Construction
@@ -144,6 +179,15 @@ flattenTableSymbols [] = []
 flattenTableSymbols (((istate, isymbols), ostate):table) =
   foldr (\x acc -> ((istate, x), ostate) : acc) (flattenTableSymbols table) isymbols
 
+setNowStates :: (Hashable state, Hashable symbol, 
+                 Eq state, Eq symbol) =>
+  EpsNFA state symbol -> EpsNFA state symbol
+setNowStates epsnfa =
+  changeNowStates epsnfa 
+  (fromMaybe S.empty $ 
+    M.lookup (getStartState epsnfa) 
+    (getEpsClosureTable epsnfa))
+
 -- | Construct a EpsNFA
 newEpsNFA :: (Hashable state, Hashable symbol, 
            Eq state, Eq symbol) =>
@@ -160,13 +204,14 @@ newEpsNFA states symbols startState acceptingStates transitionTable =
   in
     case (eitherStateList, eitherSymbolList) of
       (Right stateList, Right symbolList) ->
-        fmap epsClosureEpsNFA $
+        fmap (setNowStates . computeEpsClosureTable) $
         EpsNFA stateList symbolList
           <$> validateStartState stateList startState
           <*> validateAcceptingStates stateList acceptingStates
           <*> validateTransitionTable stateList symbolList 
               (flattenTableSymbols transitionTable)
-          <*> fmap S.singleton (validateStartState stateList startState)
+          <*> Right S.empty
+          <*> Right M.empty
       (Left err, _) -> Left err
       (_, Left err) -> Left err
 

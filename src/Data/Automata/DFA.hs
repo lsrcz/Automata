@@ -1,12 +1,6 @@
 module Data.Automata.DFA 
-    ( DFA
+    ( DFA(..)
     , DFAInvalid(..)
-    , getStates
-    , getSymbols
-    , getStartState
-    , getAcceptingStates
-    , getTransitionTable
-    , getNowState
     , newDFA
     , delta
     , deltaHat
@@ -84,27 +78,7 @@ validateAcceptingStates stateList acceptingStates =
   if all (`S.member` stateList) acceptingStates
     then Right $ S.fromList acceptingStates
     else Left DFAInvalidAcceptingStates
-{-
-validateTableInputStates :: (Hashable state, Hashable symbol,
-                             Eq state, Eq symbol) =>
-     S.HashSet state -> S.HashMap (state, symbol) state
-  -> Maybe DFAInvalid
-validateTableInputStates stateList transitionTable =
-  if all (\(state, _) -> S.member state statesList)
-         (M.keys transitionTable)
-    then Nothing
-    else Just DFAInvalidInputStates
 
-validateTableInputSymbols :: (Hashable state, Hashable symbol,
-                            Eq state, Eq symbol) =>
-     S.HashSet symbol -> S.HashMap (state, symbol) state
-  -> Maybe DFAInvalid
-validateTableInputSymbols symbolList transitionTable =
-  if all (\(_, symbol) -> S.member symbol symbolList)
-         (M.keys transitionTable)
-    then Nothing
-    else Just DFAInvalidInputSymbols
--}
 validateTableIO :: (Hashable state, Hashable symbol,
                     Eq state, Eq symbol) =>
      S.HashSet state -> S.HashSet symbol -> [((state, symbol), state)]

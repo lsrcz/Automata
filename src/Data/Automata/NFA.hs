@@ -1,12 +1,6 @@
 module Data.Automata.NFA
-    ( NFA
+    ( NFA(..)
     , NFAInvalid(..)
-    , getStates
-    , getSymbols
-    , getStartState
-    , getAcceptingStates
-    , getTransitionTable
-    , getNowStates
     , newNFA
     , delta
     , deltaHat

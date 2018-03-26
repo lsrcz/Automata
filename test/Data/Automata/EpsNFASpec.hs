@@ -10,7 +10,8 @@ import GHC.Generics
 import Data.Hashable
 import Data.List
 
-data States = Q0 | Q1 | Q2 | Q3 | Q4 | Q5 deriving (Show, Eq, Generic, Ord)
+data States = Q0 | Q1 | Q2 | Q3 | Q4 | Q5 | Q6 | Q7 | Q8 | Q9
+  deriving (Show, Eq, Generic, Ord, Enum)
 
 instance Hashable States
 
@@ -107,20 +108,87 @@ spec = do
           `shouldBe` Left EpsNFAInvalidOutputState
       it ("duplicate entries or missing entries in the transitionTable of an EpsNFA" ++
          "is not an error") $ do
-        let nfa = newEpsNFA [Q0,Q1] 
-                         "01"
-                         Q0 
-                         [Q1] 
-                         [((Q0,[Just '0']),[Q0])
-                         ,((Q0,[Just '1']),[Q1])
-                         ,((Q0,[Just '0']),[Q1])
-                         ,((Q1,[Just '0']),[Q0])
-                         ,((Q1,[Just '1']),[Q1])] :: Either EpsNFAInvalid (EpsNFA States Char)
-        fmap getTransitionTable nfa `shouldBe` 
+        let epsnfa1 = newEpsNFA [Q0,Q1] 
+                                "01"
+                                Q0 
+                                [Q1] 
+                                [((Q0,[Just '0']),[Q0])
+                                ,((Q0,[Just '1']),[Q1])
+                                ,((Q0,[Just '0']),[Q1])
+                                ,((Q1,[Just '0']),[Q0])
+                                ,((Q1,[Just '1']),[Q1])] :: Either EpsNFAInvalid (EpsNFA States Char)
+        fmap getTransitionTable epsnfa1 `shouldBe` 
           Right (M.fromList [((Q0,Just '0'),S.fromList [Q0,Q1])
                             ,((Q0,Just '1'),S.fromList [Q1])
                             ,((Q1,Just '0'),S.fromList [Q0])
                             ,((Q1,Just '1'),S.fromList [Q1])])
+    describe "can generate right epsilon closures" $ do
+      it "general" $ do
+        let epsnfa1 = newEpsNFA [Q0,Q1,Q2,Q3,Q4,Q5]
+                                "0" Q0 [Q5]
+                                [((Q0,[Nothing]),[Q0,Q1,Q2])
+                                ,((Q1,[Nothing]),[Q3])
+                                ,((Q2,[Nothing]),[Q4])
+                                ,((Q3,[Nothing]),[Q1,Q5])
+                                ,((Q4,[Nothing]),[Q5])]
+        let epsilonTable = M.fromList [(Q0,S.fromList [Q0,Q1,Q2,Q3,Q4,Q5])
+                                      ,(Q1,S.fromList [Q1,Q3,Q5])
+                                      ,(Q2,S.fromList [Q2,Q4,Q5])
+                                      ,(Q3,S.fromList [Q1,Q3,Q5])
+                                      ,(Q4,S.fromList [Q4,Q5])
+                                      ,(Q5,S.fromList [Q5])]
+        fmap getEpsClosureTable epsnfa1 `shouldBe` Right epsilonTable
+      it "line" $ do
+        let epsnfa2 = newEpsNFA [Q0,Q1,Q2,Q3,Q4,Q5]
+                                "0" Q0 [Q5]
+                                [((Q0,[Nothing]),[Q1])
+                                ,((Q1,[Nothing]),[Q2])
+                                ,((Q2,[Nothing]),[Q3])
+                                ,((Q3,[Nothing]),[Q4])
+                                ,((Q4,[Nothing]),[Q5])]
+        let epsilonTable = M.fromList [(Q0,S.fromList [Q0,Q1,Q2,Q3,Q4,Q5])
+                                      ,(Q1,S.fromList [Q1,Q2,Q3,Q4,Q5])
+                                      ,(Q2,S.fromList [Q2,Q3,Q4,Q5])
+                                      ,(Q3,S.fromList [Q3,Q4,Q5])
+                                      ,(Q4,S.fromList [Q4,Q5])
+                                      ,(Q5,S.fromList [Q5])]
+        fmap getEpsClosureTable epsnfa2 `shouldBe` Right epsilonTable
+      it "cycle" $ do
+        let epsnfa3 = newEpsNFA [Q0,Q1,Q2,Q3,Q4,Q5]
+                                "0" Q0 [Q5]
+                                [((Q0,[Nothing]),[Q1])
+                                ,((Q1,[Nothing]),[Q2])
+                                ,((Q2,[Nothing]),[Q3])
+                                ,((Q3,[Nothing]),[Q4])
+                                ,((Q4,[Nothing]),[Q5])
+                                ,((Q5,[Nothing]),[Q0])]
+        let epsilonTable = M.fromList [(Q0,S.fromList [Q0,Q1,Q2,Q3,Q4,Q5])
+                                      ,(Q1,S.fromList [Q0,Q1,Q2,Q3,Q4,Q5])
+                                      ,(Q2,S.fromList [Q0,Q1,Q2,Q3,Q4,Q5])
+                                      ,(Q3,S.fromList [Q0,Q1,Q2,Q3,Q4,Q5])
+                                      ,(Q4,S.fromList [Q0,Q1,Q2,Q3,Q4,Q5])
+                                      ,(Q5,S.fromList [Q0,Q1,Q2,Q3,Q4,Q5])]
+        fmap getEpsClosureTable epsnfa3 `shouldBe` Right epsilonTable
+      it "more complex" $ do
+        let epsnfa4 = newEpsNFA (enumFromTo Q1 Q9)
+                                "0" Q1 [Q8]
+                                [((Q1, [Nothing]), [Q5])
+                                ,((Q2, [Nothing]), [Q3,Q5])
+                                ,((Q3, [Nothing]), [Q5])
+                                ,((Q4, [Nothing]), [Q1])
+                                ,((Q5, [Nothing]), [Q4,Q8])
+                                ,((Q7, [Nothing]), [Q4])
+                                ,((Q9, [Nothing]), [Q6])]
+        let epsilonTable = M.fromList [(Q1,S.fromList [Q1,Q4,Q5,Q8])
+                                      ,(Q2,S.fromList [Q1,Q2,Q3,Q4,Q5,Q8])
+                                      ,(Q3,S.fromList [Q1,Q3,Q4,Q5,Q8])
+                                      ,(Q4,S.fromList [Q1,Q4,Q5,Q8])
+                                      ,(Q5,S.fromList [Q1,Q4,Q5,Q8])
+                                      ,(Q6,S.fromList [Q6])
+                                      ,(Q7,S.fromList [Q1,Q4,Q5,Q7,Q8])
+                                      ,(Q8,S.fromList [Q8])
+                                      ,(Q9,S.fromList [Q6,Q9])]
+        fmap getEpsClosureTable epsnfa4 `shouldBe` Right epsilonTable
   describe "Automata instance" $ do
     describe "isAccepted" $ do
       it "should not accept" $
